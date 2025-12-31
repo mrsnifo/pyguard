@@ -4,6 +4,7 @@ from aiohttp.typedefs import Handler
 from aiohttp.web_app import Application
 from aiohttp.web_request import Request
 from aiohttp.web_response import StreamResponse
+from .state import ConnectionState
 
 MiddlewareType = Callable[
     [Application, Callable[[Request], Awaitable[StreamResponse]]],
@@ -11,21 +12,19 @@ MiddlewareType = Callable[
 ]
 
 class Middleware:
-    async def before(self, request: Request) -> None:
-        print("BEFORE:", request.method, request.path)
 
-    async def after(self, request: Request, response: StreamResponse) -> None:
-        print("AFTER:", response.status)
+    def __init__(self, state: ConnectionState):
+        self._state = state
 
     async def middleware(self, _, handler: Handler) -> Handler:
         async def wrapped(request: Request) -> StreamResponse:
-            await self.before(request)
+            await self._state.on_request_start(request)
             try:
                 response = await handler(request)
             except web.HTTPException as exc:
-                await self.after(request, exc)
+                await self._state.on_request_error(request, exc)
                 raise
-            await self.after(request, response)
+            await self._state.on_request_end(request, response)
             return response
         return wrapped
 
