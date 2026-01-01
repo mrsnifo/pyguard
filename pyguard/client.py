@@ -107,7 +107,7 @@ class _App(Application):
 
         Parameters
         ----------
-        loop: Optional[asyncio.AbstractEventLoop], optional
+        loop: Optional[asyncio.AbstractEventLoop]
             The event loop to use. If None, uses the current loop.
         access_log_class: Type[AbstractAccessLogger], default=AccessLogger
             The access logger class to use for logging requests.
@@ -161,15 +161,15 @@ class Client:
 
     Parameters
     ----------
-    connector: Optional[aiohttp.BaseConnector], optional
+    connector: Optional[aiohttp.BaseConnector]
         Custom aiohttp connector for HTTP connections.
-    proxy: Optional[str], optional
+    proxy: Optional[str]
         Proxy URL for outgoing HTTP requests (e.g., 'http://proxy:8080').
-    proxy_auth: Optional[aiohttp.BasicAuth], optional
+    proxy_auth: Optional[aiohttp.BasicAuth]
         Authentication credentials for the proxy.
-    http_trace: Optional[aiohttp.TraceConfig], optional
+    http_trace: Optional[aiohttp.TraceConfig]
         Trace configuration for debugging HTTP requests.
-    app_logger: Optional[logging.Logger], optional
+    app_logger: Optional[logging.Logger]
         Custom logger for the application.
     app_client_max_size: int, default=1048576
         Maximum size in bytes for client request payloads (default 1MB).
@@ -489,7 +489,7 @@ class Client:
             The hostname or IP address to bind to.
         port: int
             The port number to listen on.
-        log_handler: Optional[logging.Handler], optional
+        log_handler: Optional[logging.Handler]
             Custom logging handler. If None, uses default setup.
         log_level: int
             The logging level to use.
