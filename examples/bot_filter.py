@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
-from aiohttp.web import Response
 from pyguard import Client, Request, Response
+from aiohttp.web import Response
 import time
 
 client = Client()
