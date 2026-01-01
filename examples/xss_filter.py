@@ -1,5 +1,5 @@
 from aiohttp.web import Response
-from pyguard import Client, http
+from pyguard import Client, Request, Response
 import re
 
 client = Client()
@@ -22,7 +22,7 @@ def contains_xss(value: str) -> bool:
 
 
 @client.event
-async def on_request(request: http.Request):
+async def on_request(request: Request):
     for key, value in request.query.items():
         if contains_xss(value):
             request.respond(
@@ -54,7 +54,7 @@ async def on_request(request: http.Request):
 
 
 @client.event
-async def on_forward(response):
+async def on_forward(response: Response):
     response.headers["X-Filtered-By"] = "PyGuard"
     response.respond(response)
 

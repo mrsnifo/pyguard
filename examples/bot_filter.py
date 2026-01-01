@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 from aiohttp.web import Response
-from pyguard import Client
+from pyguard import Client, Request, Response
 import time
 
 client = Client()
@@ -95,7 +95,7 @@ def probing_path(path: str) -> bool:
     return False
 
 @client.event
-async def on_request(request):
+async def on_request(request: Request):
     ip = request.remote or "unknown"
 
     if is_blocked(ip):
@@ -140,7 +140,7 @@ async def on_request(request):
 
 
 @client.event
-async def on_forward(response):
+async def on_forward(response: Response):
     response.headers["X-Filtered-By"] = "PyGuard"
     response.respond(response)
 
