@@ -504,11 +504,11 @@ class Client:
         async def runner() -> None:
             async with self:
                 await self.start(host, port, **options)
-                _logger.info(f"Server running on {host}:{port}")
+                _logger.debug(f"Server running on {host}:{port}")
                 try:
                     await self._shutdown.wait()
                 except KeyboardInterrupt:
-                    _logger.info("Received shutdown signal")
+                    _logger.debug("Received shutdown signal")
 
         try:
             asyncio.run(runner())
