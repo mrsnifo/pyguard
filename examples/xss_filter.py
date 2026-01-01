@@ -1,5 +1,5 @@
-from aiohttp.web import Response
 from pyguard import Client, Request, Response
+from aiohttp import web
 import re
 
 client = Client()
@@ -26,7 +26,7 @@ async def on_request(request: Request):
     for key, value in request.query.items():
         if contains_xss(value):
             request.respond(
-                Response(
+                web.Response(
                     text="Blocked: XSS detected in query parameters",
                     status=400,
                 )
@@ -35,7 +35,7 @@ async def on_request(request: Request):
     for key, value in request.headers.items():
         if contains_xss(value):
             request.respond(
-                Response(
+                web.Response(
                     text="Blocked: XSS detected in headers",
                     status=400,
                 )
@@ -45,7 +45,7 @@ async def on_request(request: Request):
         body = await request.text()
         if contains_xss(body):
             request.respond(
-                Response(
+                web.Response(
                     text="Blocked: XSS detected in request body",
                     status=400,
                 )
