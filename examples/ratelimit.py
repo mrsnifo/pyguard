@@ -3,13 +3,13 @@ from pyguard import Client, http
 from aiohttp.web import Response
 import time
 
-app = Client()
+client = Client()
 
 RATE_LIMIT = 3
 TIME_WINDOW = 5
 clients = defaultdict(list)
 
-@app.event
+@client.event
 async def on_request(request: http.Request):
     now = time.time()
     ip = request.remote
@@ -20,4 +20,4 @@ async def on_request(request: http.Request):
     clients[ip].append(now)
     request.forward("http://localhost:8030", request)
 
-app.run(host="localhost", port=8080)
+client.run(port=8080)
