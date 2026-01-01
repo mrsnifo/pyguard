@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from aiohttp.web import Response
+
 from typing import Optional, Type, Any
 from aiohttp.abc import AbstractAccessLogger
-from aiohttp.web import Application, AppRunner, TCPSite
+from aiohttp.web import Application, AppRunner, TCPSite, BaseRequest
 from aiohttp.web_log import AccessLogger
+from typing import Callable
 from types import TracebackType
 from .server import Server
 import logging
 from . import utils
 
+_logger = logging.getLogger(__name__)
 
 class _LoopSentinel:
     """Sentinel class to handle loop access before app initialization."""
@@ -33,6 +37,7 @@ class App(Application):
         self._site: Optional[TCPSite] = None
         self._closing_task: Optional[asyncio.Task] = None
         self._ready: Optional[asyncio.Event] = None
+        self.server: Optional[Server] = None
 
     async def __aenter__(self) -> App:
         return self
@@ -59,25 +64,6 @@ class App(Application):
         This method is called internally to instantiate our custom Server class
         instead of the default aiohttp RequestHandler. It's where we hook in our
         custom request handling logic.
-
-        Parameters
-        ----------
-        loop: Optional[asyncio.AbstractEventLoop]
-            Event loop to use for async operations. If None, uses the app's loop.
-        access_log_class: Type[AbstractAccessLogger]
-            Logger class for access logs. Must inherit from AbstractAccessLogger.
-        **kwargs: Any
-            Additional arguments passed to the Server constructor.
-
-        Returns
-        -------
-        Server
-            Our custom Server instance that will handle incoming requests.
-
-        Raises
-        ------
-        TypeError
-            If access_log_class doesn't inherit from AbstractAccessLogger.
         """
         if not issubclass(access_log_class, AbstractAccessLogger):
             raise TypeError(
@@ -95,13 +81,61 @@ class App(Application):
             for k, v in self._handler_args.items():
                 kwargs[k] = v
 
-        server = Server(
+        self.server = Server(
             self._handle,  # type: ignore[arg-type]
             request_factory=self._make_request,
             loop=self._loop,
-            **kwargs,
+            **kwargs
         )
-        return server
+        self.server.app = self
+        return self.server
+
+
+    def event(self, coro: Callable[..., Any], /) -> Callable[..., Any]:
+        if not asyncio.iscoroutinefunction(coro):
+            raise TypeError('Event handler must be a coroutine function')
+        setattr(self, coro.__name__, coro)
+        return coro
+
+    async def on_middleware(self, request: BaseRequest): ...
+
+    async def dispatch(self, event: str, /, *args: Any, **kwargs: Any) -> None:
+        method = 'on_' + event
+        try:
+            coro = getattr(self, method)
+            if coro is not None and asyncio.iscoroutinefunction(coro):
+                _logger.debug('Dispatching event: %s', event)
+                wrapped = self._run_event(coro, method, *args, **kwargs)
+                self._loop.create_task(wrapped, name=f'pyguard:{method}')
+        except AttributeError:
+            pass
+
+    async def _run_event(
+            self,
+            coro: Callable[..., Any],
+            event_name: str,
+            *args: Any,
+            **kwargs: Any
+    ) -> None:
+        try:
+            await coro(*args, **kwargs)
+        except asyncio.CancelledError:
+            pass
+        except Exception as error:
+            await self.on_error(event_name, error, *args, **kwargs)
+
+    @staticmethod
+    async def on_error(
+            event_method: str,
+            error: Exception,
+            /,
+            *args: Any,
+            **kwargs: Any
+    ) -> None:
+        _logger.exception(
+            'Error in %s: %s, args: %s kwargs: %s',
+            event_method, error, args, kwargs
+        )
 
     async def serve(self, host: str, port: int = 8080, **options: Any) -> None:
         self._site = TCPSite(self._runner, host=host, port=port, **options)
@@ -111,7 +145,7 @@ class App(Application):
         self._runner = AppRunner(self)
         await self._runner.setup()
 
-    async def start(self, host: str = 'localhost', port: int = 8080, **options: Any) -> None:
+    async def start(self, host: str, port: int, **options: Any) -> None:
         await self.setup_runner()
         await self.serve(host, port, **options)
 
@@ -125,7 +159,6 @@ class App(Application):
             root_logger: bool = False,
             **options
     ) -> None:
-        """Run the application (blocking call)."""
         if log_handler is None:
             utils.setup_logging(handler=log_handler, level=log_level, root=root_logger)
 

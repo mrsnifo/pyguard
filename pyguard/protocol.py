@@ -1,53 +1,40 @@
-from typing import Optional, Callable, Awaitable, Tuple
-from aiohttp.web_exceptions import HTTPException
-from aiohttp import web_protocol
-import warnings
-import asyncio
-
+from typing import Optional, Callable, Tuple
+from aiohttp import web_protocol, web
+from aiohttp.web import BaseRequest, StreamResponse
+from .http import CustomRequest, _RespondNow  # import the internal exception
 
 class RequestHandler(web_protocol.RequestHandler):
 
     async def _handle_request(
-            self,
-            request: web_protocol.BaseRequest,
-            start_time: Optional[float],
-            request_handler: Callable[[web_protocol.BaseRequest], Awaitable[web_protocol.StreamResponse]]
-    ) -> Tuple[web_protocol.StreamResponse, bool]:
+        self,
+        request: BaseRequest,
+        start_time: Optional[float],
+        _: Callable,
+    ) -> Tuple[StreamResponse, bool]:
 
         self._request_in_progress = True
         try:
-            try:
+            rq = CustomRequest(request)
 
-                self._current_request = request
-                resp = await request_handler(request)
-            finally:
-                self._current_request = None
-        except HTTPException as exc:
-            resp = exc
-            resp, reset = await self.finish_response(request, resp, start_time)
-        except asyncio.CancelledError:
-            raise
-        except asyncio.TimeoutError as exc:
-            self.log_debug("Request handler timed out.", exc_info=exc)
-            resp = self.handle_error(request, 504)
-            resp, reset = await self.finish_response(request, resp, start_time)
-        except Exception as exc:
-            resp = self.handle_error(request, 500, exc)
-            resp, reset = await self.finish_response(request, resp, start_time)
-        else:
-            # Deprecation warning (See #2415)
-            if getattr(resp, "__http_exception__", False):
-                warnings.warn(
-                    "returning HTTPException object is deprecated "
-                    "(#2415) and will be removed, "
-                    "please raise the exception instead",
-                    DeprecationWarning,
+            try:
+                # Call middleware, which may call rq.respond()
+                await self._manager.app.on_middleware(rq)
+            except _RespondNow as exc:
+                # Middleware requested an immediate response
+                return await self.finish_response(
+                    request,
+                    exc.response,
+                    start_time,
                 )
 
-            resp, reset = await self.finish_response(request, resp, start_time)
+            # Default response if no middleware responded
+            return await self.finish_response(
+                request,
+                web.Response(text="OK"),
+                start_time,
+            )
+
         finally:
             self._request_in_progress = False
             if self._handler_waiter is not None:
                 self._handler_waiter.set_result(None)
-
-        return resp, reset
