@@ -1,7 +1,7 @@
 from typing import Optional, Callable, Tuple
 from aiohttp import web_protocol, web
 from aiohttp.web import BaseRequest, StreamResponse
-from .http import CustomRequest, _RespondNow  # import the internal exception
+from .http import Request, RequestAborted
 
 class RequestHandler(web_protocol.RequestHandler):
 
@@ -14,20 +14,14 @@ class RequestHandler(web_protocol.RequestHandler):
 
         self._request_in_progress = True
         try:
-            rq = CustomRequest(request)
-
             try:
-                # Call middleware, which may call rq.respond()
-                await self._manager.app.on_middleware(rq)
-            except _RespondNow as exc:
-                # Middleware requested an immediate response
+                await self._manager.dispatch('middleware', Request(request))
+            except RequestAborted as exc:
                 return await self.finish_response(
                     request,
                     exc.response,
                     start_time,
                 )
-
-            # Default response if no middleware responded
             return await self.finish_response(
                 request,
                 web.Response(text="OK"),
