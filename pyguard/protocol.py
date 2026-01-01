@@ -26,7 +26,7 @@ class RequestHandler(web_protocol.RequestHandler):
                     start_time,
                 )
             except RequestForward as exc:
-                forward = await self._manager.proxy.forward(exc.target_url, exc.request)  # type: ignore
+                forward = await self._manager.proxy.forward(exc.url, exc.request)  # type: ignore
                 forward.__class__ = Response
                 try:
                     await self._manager.dispatch('forward', forward)  # type: ignore
