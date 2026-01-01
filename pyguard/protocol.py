@@ -14,33 +14,33 @@ class RequestHandler(web_protocol.RequestHandler):
         _: Callable,
     ) -> Tuple[web_protocol.StreamResponse, bool]:
         self._request_in_progress = True
+
         try:
+            request.__class__ = Request
+            await self._manager.dispatch('request', request)  # type: ignore
+            raise RequestNotHandled(request, start_time)
+        except RequestAborted as exc:
+            return await self.finish_response(
+                request,
+                exc.response,
+                start_time,
+            )
+        except RequestForward as exc:
+            forward = await self._manager.proxy.forward(exc.url, exc.request)  # type: ignore
+            forward.__class__ = Response
             try:
-                request.__class__ = Request
-                await self._manager.dispatch('request', request)  # type: ignore
-                raise RequestNotHandled(request, start_time)
+                await self._manager.dispatch('forward', forward)  # type: ignore
+                return await self.finish_response(
+                    request,
+                    forward,
+                    start_time,
+                )
             except RequestAborted as exc:
                 return await self.finish_response(
                     request,
                     exc.response,
                     start_time,
                 )
-            except RequestForward as exc:
-                forward = await self._manager.proxy.forward(exc.url, exc.request)  # type: ignore
-                forward.__class__ = Response
-                try:
-                    await self._manager.dispatch('forward', forward)  # type: ignore
-                    return await self.finish_response(
-                        request,
-                        forward,
-                        start_time,
-                    )
-                except RequestAborted as exc:
-                    return await self.finish_response(
-                        request,
-                        exc.response,
-                        start_time,
-                    )
         finally:
             self._request_in_progress = False
             if self._handler_waiter is not None:

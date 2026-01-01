@@ -27,7 +27,9 @@ class RequestForward(PyGuardException):
         super().__init__(f"Request forwarding to: {url}")
 
 class RequestNotHandled(PyGuardException):
+    """Raised when a request was neither responded to nor forwarded."""
+
     def __init__(self, request: web.BaseRequest, start_time: Optional[float]) -> None:
         self.request: web.BaseRequest = request
         self.start_time: Optional[float] = start_time
-        super().__init__("Request did not respond or forward")
+        super().__init__(f"Request {request.method} {request.path} did not respond or forward")

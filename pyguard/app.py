@@ -19,7 +19,6 @@ from . import utils
 _logger = logging.getLogger(__name__)
 
 class _LoopSentinel:
-    """Sentinel class to handle loop access before app initialization."""
     __slots__ = ()
 
     def __getattr__(self, attr: str) -> None:
