@@ -16,13 +16,12 @@ class RequestHandler(web_protocol.RequestHandler):
             try:
                 request.__call__ = Request
                 await self._manager.dispatch('request', request)  # type: ignore
-                proxy_response = await self._manager.proxy.forward(request) # type: ignore
                 forward = await self._manager.proxy.forward(request) # type: ignore
                 forward.__class__ = Response
                 await self._manager.dispatch('response', forward)  # type: ignore
                 return await self.finish_response(
                     request,
-                    proxy_response,
+                    forward,
                     start_time,
                 )
             except RequestAborted as exc:
