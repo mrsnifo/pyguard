@@ -94,7 +94,7 @@ def probing_path(path: str) -> bool:
             return True
     return False
 
-@app.event
+@client.event
 async def on_request(request):
     ip = request.remote or "unknown"
 
