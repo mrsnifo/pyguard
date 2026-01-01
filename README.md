@@ -24,13 +24,13 @@ python3 -m pip install -U .
 ## Respond Example
 
 ```python
+from pyguard import Client, Request
 from aiohttp.web import Response
-from pyguard import Client
 
 client = Client()
 
 @client.event
-async def on_request(request):
+async def on_request(request: Request):
     print(f"Request from {request.remote}")
     # Respond immediately
     request.respond(Response(text="Access Denied", status=403))
@@ -41,16 +41,16 @@ client.run(host="localhost", port=8080)
 ## Forward Example
 
 ```python
-from pyguard import Client
+from pyguard import Client, Request, Response
 
 client = Client()
 
 @client.event
-async def on_request(request):
+async def on_request(request: Request):
     request.forward("http://localhost:8030", request)
 
 @client.event
-async def on_forward(response):
+async def on_forward(response: Response):
     # Modify the forwarded response
     response.headers["X-Filtered-By"] = "PyGuard"
     response.respond(response)
