@@ -187,7 +187,7 @@ class App:
             *,
             log_handler: Optional[logging.Handler] = None,
             log_level: int = logging.INFO,
-            root_logger: bool = False,
+            root_logger: bool = True,
             **options
     ) -> None:
         if log_handler is None:
