@@ -1,17 +1,12 @@
-from aiohttp import web
 import logging
 from typing import Optional
 from aiohttp import web, ClientSession, ClientTimeout
-
-class RequestAborted(Exception):
-    __slots__ = ("response",)
-
-    def __init__(self, response: web.StreamResponse):
-        self.response = response
-
+from typing import Any, Self
+from .errors import RequestAborted, RequestForward
+import asyncio
 
 class Request(web.BaseRequest):
-    __slots__ = ('request',)
+    __slots__ = ()
 
     def respond(self, response: web.StreamResponse) -> None:
         """
@@ -20,14 +15,13 @@ class Request(web.BaseRequest):
         """
         raise RequestAborted(response)
 
-    def __repr__(self):
-        return repr(self.request)
+
+    def forward(self, url: str, request: Self) -> None:
+        raise RequestForward(url, request)
 
 
 class Response(web.Response):
-    """
-    Subclass of aiohttp.web.Response with `respond()` helper.
-    """
+    __slots__ = ()
 
     def respond(self, response: web.StreamResponse) -> None:
         """
@@ -35,16 +29,12 @@ class Response(web.Response):
         Raises an internal exception that should be caught by the request handler.
         """
         raise RequestAborted(response)
-
-    def __repr__(self):
-        return super().__repr__()
 
 
 _logger = logging.getLogger(__name__)
 
 
-class HTTPHandler:
-    """Handles HTTP request forwarding."""
+class HTTPClient:
 
     HOP_BY_HOP_HEADERS = frozenset({
         "connection",
@@ -57,49 +47,60 @@ class HTTPHandler:
         "upgrade",
     })
 
-    def __init__(self, target_url: str, timeout: int = 30):
-        self.target_url = target_url.rstrip("/")
+    def __init__(self, timeout: int = 30):
+        self.__session: Optional[ClientSession] = None
         self.timeout = ClientTimeout(total=timeout)
-        self._session: Optional[ClientSession] = None
 
-    @property
-    def session(self) -> ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = ClientSession(timeout=self.timeout)
-        return self._session
+    def clear(self) -> None:
+        if self.__session and self.__session.closed:
+            self.__session = None
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
-            _logger.debug("HTTP session closed")
+        if self.__session:
+            await self.__session.close()
 
-    async def forward(self, request: web.Request) -> web.Response:
-        target_url = f"{self.target_url}{request.path_qs}"
-        _logger.debug(f"Forwarding {request.method} {target_url}")
+    def _get_session(self) -> ClientSession:
+        if self.__session is None or self.__session.closed:
+            self.__session = ClientSession(timeout=self.timeout)
+        return self.__session
 
-        # Prepare headers and body
-        headers = self._filter_headers(request.headers, include_host=True)
-        body = await request.read() if request.can_read_body else None
+    async def request(self, **kwargs: Any) -> web.Response:
+        session = self._get_session()
 
-        try:
-            async with self.session.request(
-                    method=request.method,
-                    url=target_url,
-                    headers=headers,
-                    data=body,
-                    allow_redirects=False
-            ) as response:
-                response_headers = self._filter_headers(response.headers)
-                response_body = await response.read()
-                return web.Response(
-                    status=response.status,
-                    reason=response.reason,
-                    headers=response_headers,
-                    body=response_body
-                )
-        except Exception as e:
-            _logger.error(f"Error forwarding request to {target_url}: {e}")
-            raise
+        raw_headers = kwargs.get("headers")
+        if raw_headers is not None:
+            kwargs["headers"] = self._filter_headers(
+                raw_headers,
+                include_host=True
+            )
+
+        for tries in range(5):
+            try:
+                async with session.request(**kwargs) as response:
+                    _logger.debug(
+                        "%s %s returned %s",
+                        response.method,
+                        response.url,
+                        response.status
+                    )
+
+                    response_headers = self._filter_headers(response.headers)
+                    response_body = await response.read()
+
+                    return web.Response(
+                        status=response.status,
+                        reason=response.reason,
+                        headers=response_headers,
+                        body=response_body
+                    )
+
+            except OSError as exc:
+                if tries < 4 and exc.errno in {54, 10054}:
+                    await asyncio.sleep(1 + tries * 2)
+                    continue
+                raise
+
+        raise RuntimeError("Unreachable, all retries exhausted")
 
     def _filter_headers(
             self,

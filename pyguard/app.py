@@ -8,7 +8,8 @@ from aiohttp.web import Application, AppRunner, TCPSite
 from aiohttp.web_log import AccessLogger
 from typing import Callable
 from types import TracebackType
-from .http import RequestAborted
+from .http import HTTPClient
+from .errors import RequestAborted, RequestForward
 
 from .proxy import Proxy
 from .server import Server
@@ -86,7 +87,8 @@ class App:
 
     def __init__(self):
         self.loop = _loop
-        self.proxy = Proxy("http://localhost:8030")
+        self.http = HTTPClient()
+        self.proxy = Proxy(http=self.http)
         self.app = _App(self.dispatch, self.proxy)
         self._runner: Optional[AppRunner] = None
         self._site: Optional[TCPSite] = None
@@ -148,7 +150,7 @@ class App:
             await coro(*args, **kwargs)
         except asyncio.CancelledError:
             pass
-        except RequestAborted:
+        except (RequestAborted, RequestForward):
             raise
         except Exception as error:
             await self.on_error(event_name, error, *args, **kwargs)
