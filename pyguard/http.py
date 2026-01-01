@@ -1,23 +1,37 @@
-from aiohttp.web import BaseRequest, StreamResponse
+from aiohttp import web
 
 class RequestAborted(Exception):
     __slots__ = ("response",)
 
-    def __init__(self, response: StreamResponse):
+    def __init__(self, response: web.StreamResponse):
         self.response = response
 
-class Request:
-    __slots__ = ("_req",)
 
-    def __init__(self, request: BaseRequest):
-        self._req = request
+class Request(web.BaseRequest):
+    __slots__ = ('request',)
 
-    def respond(self, response: StreamResponse) -> None:
+    def respond(self, response: web.StreamResponse) -> None:
         """
         Immediately sends a response and stops further middleware execution.
         Raises an internal exception that should be caught by the request handler.
         """
         raise RequestAborted(response)
 
-    def __getattr__(self, name):
-        return getattr(self._req, name)
+    def __repr__(self):
+        return repr(self.request)
+
+
+class Response(web.Response):
+    """
+    Subclass of aiohttp.web.Response with `respond()` helper.
+    """
+
+    def respond(self, response: web.StreamResponse) -> None:
+        """
+        Immediately sends a response and stops further middleware execution.
+        Raises an internal exception that should be caught by the request handler.
+        """
+        raise RequestAborted(response)
+
+    def __repr__(self):
+        return super().__repr__()

@@ -86,7 +86,7 @@ class App:
 
     def __init__(self):
         self.loop = _loop
-        self.proxy = Proxy()
+        self.proxy = Proxy("http://localhost:8030")
         self.app = _App(self.dispatch, self.proxy)
         self._runner: Optional[AppRunner] = None
         self._site: Optional[TCPSite] = None
