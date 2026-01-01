@@ -30,6 +30,12 @@ from aiohttp.web import Response
 client = Client()
 
 @client.event
+async def on_ready():
+    print("Server is ready")
+
+client.run(host="localhost", port=8080)
+
+@client.event
 async def on_request(request: Request):
     print(f"Request from {request.remote}")
     # Respond immediately
