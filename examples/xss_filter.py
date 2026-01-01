@@ -53,4 +53,10 @@ async def on_request(request: http.Request):
     request.forward("http://localhost:8030", request)
 
 
+@client.event
+async def on_forward(response):
+    response.headers["X-Filtered-By"] = "PyGuard"
+    response.respond(response)
+
+
 client.run(port=8080)
