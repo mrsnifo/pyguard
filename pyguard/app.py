@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Type, List
-from aiohttp import web
+import asyncio
+from typing import Optional, Type, Any
+from aiohttp.abc import AbstractAccessLogger
+from aiohttp.web import Application, AppRunner, TCPSite
+from aiohttp.web_log import AccessLogger
 from types import TracebackType
-from .middleware import Middleware
-from .state import ConnectionState
-from .proxy import Proxy
+from .server import Server
 import logging
 from . import utils
-import asyncio
-
-__all__ = ('App',)
-
-_logger = logging.getLogger(__name__)
 
 
 class _LoopSentinel:
@@ -29,43 +25,16 @@ class _LoopSentinel:
 _loop: Any = _LoopSentinel()
 
 
-class App:
-    """Main application class."""
+class App(Application):
 
-    def __init__(self):
-        self.loop: asyncio.AbstractEventLoop = _loop
-        self._app: Optional[web.Application] = None
-        self._runner: Optional[web.AppRunner] = None
-        self._site: Optional[web.TCPSite] = None
+    def __init__(self, **options):
+        super().__init__(**options)
+        self._runner: Optional[AppRunner] = None
+        self._site: Optional[TCPSite] = None
         self._closing_task: Optional[asyncio.Task] = None
         self._ready: Optional[asyncio.Event] = None
-        self.proxy = Proxy(target_url="http://localhost:8030")
-        self._state: ConnectionState = ConnectionState(app=self, proxy=self.proxy)
-        self._middleware: Middleware = Middleware(state=self._state)
-
-    @property
-    def app(self) -> web.Application:
-        """Get the underlying aiohttp application."""
-        if self._app is None:
-            raise RuntimeError("App not initialized. Call setup first.")
-        return self._app
-
-    @property
-    def router(self) -> web.UrlDispatcher:
-        """Get the application router."""
-        return self.app.router
-
-    @property
-    def state(self) -> ConnectionState:
-        """Get the connection state manager."""
-        return self._state
-
-    def is_ready(self) -> bool:
-        """Check if the app is ready to handle requests."""
-        return self._ready is not None and self._ready.is_set()
 
     async def __aenter__(self) -> App:
-        self._async_setup()
         return self
 
     async def __aexit__(
@@ -74,115 +43,77 @@ class App:
             exc_value: Optional[BaseException],
             traceback: Optional[TracebackType]
     ) -> None:
-        await self.close()
+        ...
 
-    def _async_setup(self) -> None:
-        """Initialize async components."""
-        loop = asyncio.get_running_loop()
-        self.loop = loop
-        self._ready = asyncio.Event()
-
-    def event(self, coro: Callable[..., Any], /) -> Callable[..., Any]:
-        """Register an event handler.
-
-        Usage:
-            @app.event
-            async def on_request_start(request):
-                print(f"Request: {request.path}")
-        """
-        if not asyncio.iscoroutinefunction(coro):
-            raise TypeError('Event handler must be a coroutine function')
-        setattr(self, coro.__name__, coro)
-        _logger.debug("Registered event: %s", coro.__name__)
-        return coro
-
-    def dispatch(self, event: str, /, *args: Any, **kwargs: Any) -> None:
-        """Dispatch an event to registered handlers."""
-        method = 'on_' + event
-        try:
-            coro = getattr(self, method)
-            if coro is not None and asyncio.iscoroutinefunction(coro):
-                _logger.debug('Dispatching event: %s', event)
-                wrapped = self._run_event(coro, method, *args, **kwargs)
-                self.loop.create_task(wrapped, name=f'pyguard:{method}')
-        except AttributeError:
-            pass
-
-    async def _run_event(
+    def _make_handler(
             self,
-            coro: Callable[..., Any],
-            event_name: str,
-            *args: Any,
-            **kwargs: Any
-    ) -> None:
-        """Run an event handler with error handling."""
-        try:
-            await coro(*args, **kwargs)
-        except asyncio.CancelledError:
-            pass
-        except Exception as error:
-            await self.on_error(event_name, error, *args, **kwargs)
+            *,
+            loop: Optional[asyncio.AbstractEventLoop] = None,
+            access_log_class: Type[AbstractAccessLogger] = AccessLogger,
+            **kwargs: Any,
+    ) -> Server:
 
-    @staticmethod
-    async def on_error(
-            event_method: str,
-            error: Exception,
-            /,
-            *args: Any,
-            **kwargs: Any
-    ) -> None:
-        """Default error handler for events."""
-        _logger.exception(
-            'Error in %s: %s, args: %s kwargs: %s',
-            event_method, error, args, kwargs
+        """
+        Creates a custom Server handler for the application.
+
+        This method is called internally to instantiate our custom Server class
+        instead of the default aiohttp RequestHandler. It's where we hook in our
+        custom request handling logic.
+
+        Parameters
+        ----------
+        loop: Optional[asyncio.AbstractEventLoop]
+            Event loop to use for async operations. If None, uses the app's loop.
+        access_log_class: Type[AbstractAccessLogger]
+            Logger class for access logs. Must inherit from AbstractAccessLogger.
+        **kwargs: Any
+            Additional arguments passed to the Server constructor.
+
+        Returns
+        -------
+        Server
+            Our custom Server instance that will handle incoming requests.
+
+        Raises
+        ------
+        TypeError
+            If access_log_class doesn't inherit from AbstractAccessLogger.
+        """
+        if not issubclass(access_log_class, AbstractAccessLogger):
+            raise TypeError(
+                "access_log_class must be subclass of "
+                "aiohttp.abc.AbstractAccessLogger, got {}".format(access_log_class)
+            )
+
+        self._set_loop(loop)
+        self.freeze()
+
+        kwargs["debug"] = self._debug
+        kwargs["access_log_class"] = access_log_class
+
+        if self._handler_args:
+            for k, v in self._handler_args.items():
+                kwargs[k] = v
+
+        server = Server(
+            self._handle,  # type: ignore[arg-type]
+            request_factory=self._make_request,
+            loop=self._loop,
+            **kwargs,
         )
-
-    async def setup_hook(self) -> None:
-        """Override this to perform setup operations before the app starts."""
-        pass
-
-    async def build(self, **options: Any) -> None:
-        """Build the aiohttp application."""
-        self._app = web.Application(
-            middlewares=[*self._middleware],
-            **options
-        )
-        await self.setup_hook()
-        self._ready.set()
+        return server
 
     async def serve(self, host: str, port: int = 8080, **options: Any) -> None:
-        """Start serving the application."""
-        self._runner = web.AppRunner(self._app)
-        await self._runner.setup()
-        self._site = web.TCPSite(self._runner, host=host, port=port, **options)
+        self._site = TCPSite(self._runner, host=host, port=port, **options)
         await self._site.start()
-        _logger.info(f'Server started at {host}:{port}')
-        self.dispatch('serve', host, port)
+
+    async def setup_runner(self):
+        self._runner = AppRunner(self)
+        await self._runner.setup()
 
     async def start(self, host: str = 'localhost', port: int = 8080, **options: Any) -> None:
-        """Build and start the application."""
-        await self.build()
+        await self.setup_runner()
         await self.serve(host, port, **options)
-
-    async def close(self) -> None:
-        """Gracefully close the application."""
-        if self._closing_task:
-            return await self._closing_task
-
-        async def _close():
-            if self._site:
-                await self._site.stop()
-
-            if self._runner:
-                await self._runner.cleanup()
-
-            if self._ready:
-                self._ready.clear()
-
-            self.loop = _loop
-
-        self._closing_task = asyncio.create_task(_close())
-        return await self._closing_task
 
     def run(
             self,
